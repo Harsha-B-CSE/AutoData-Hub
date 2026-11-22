@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# CPU ONNX Runtime for portable neural image restoration.
+onnxruntime==1.31.1

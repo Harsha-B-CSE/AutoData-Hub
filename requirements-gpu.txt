@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# NVIDIA CUDA 13 + cuDNN 9 ONNX Runtime. Do not install with onnxruntime CPU.
+onnxruntime-gpu[cuda,cudnn]==1.31.1

@@ -1,0 +1,30 @@
+# Supported Python: 3.11-3.13 (64-bit). Python 3.12 is recommended broadly.
+fastapi>=0.110.0,<1.0
+uvicorn>=0.28.0,<1.0
+pydantic>=2.6.0,<3.0
+sqlalchemy>=2.0.28,<3.0
+pandas==2.3.1  # Policy-approved wheel; pandas 3.1.0 is blocked by Smart App Control.
+numpy>=1.26.0,<3.0
+scipy>=1.12.0,<2.0
+scikit-learn>=1.4.0,<2.0
+opencv-python-headless>=4.9.0.80,<6.0
+pillow>=10.2.0,<14.0
+openpyxl>=3.1.2,<4.0
+reportlab>=4.1.0,<6.0
+python-multipart>=0.0.9,<1.0
+psutil>=5.9.8,<8.0
+pytest>=8.0.0,<10.0
+httpx>=0.27.0,<3.0
+pypdf==7.1.1
+streamlit==1.66.1
+plotly==7.1.0
+pyarrow==23.0.1  # Provides Parquet/Feather and includes the Arrow IPC security fix.
+psycopg2-binary==2.9.12  # Policy-approved PostgreSQL driver build.
+pymysql>=1.1.0,<2.0
+python-dotenv>=1.0.0,<2.0
+chardet>=5.2.0,<8.0
+xlrd>=2.0.1,<3.0
+
+# SUPIR is intentionally excluded. It requires a separate high-VRAM PyTorch,
+# SDXL/CLIP/LLaVA diffusion service with restrictive model terms. The main
+# application does not require torch, torchvision, diffusers, xformers, or triton.

@@ -1,0 +1,109 @@
+# Python bytecode and interpreter caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+.venv-*/
+env/
+ENV/
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Test, coverage, type checking, and lint caches
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.tox/
+.nox/
+
+# Packaging and build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Node.js dependencies, caches, and build state
+node_modules/
+.vite/
+.npm/
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# AutoData-Hub generated deliverables
+output/
+/tmp/
+
+# Runtime storage and SQLite state (retain directory placeholders)
+/storage/raw/*
+!/storage/raw/.gitkeep
+/storage/intermediate/*
+!/storage/intermediate/.gitkeep
+/storage/processed/*
+!/storage/processed/.gitkeep
+/storage/scratch/*
+!/storage/scratch/.gitkeep
+/storage/*.db
+/storage/*.db-wal
+/storage/*.db-shm
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+
+# Optional neural image-restoration weights (provision separately)
+/models/image_restoration/
+*.onnx
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+
+# Internal planning, memory, and security-audit working documents
+/guide.md
+/tracker.md
+/design.md
+/arch_plan.md
+/PRD.md
+/SECURITY_AUDIT.md
+/memory.md
+/rules.md
+/.windsurfrules
+/AUTODATA_HUB_MASTER_SPECIFICATION.md
+/DEVELOPMENT_PROGRESS.md
+
+# Notebook and profiling artifacts
+.ipynb_checkpoints/
+*.prof
+*.lprof
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+~$*
+
+# IDE and operating-system metadata
+.idea/
+.vscode/
+.vs/
+.cursor/
+/.cursorrules
+.history/
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini

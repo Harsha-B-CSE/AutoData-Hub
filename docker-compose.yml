@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=True
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - DATABASE_PATH=/workspace/storage/autodata_hub.db
+      - STORAGE_BASE_DIR=/workspace/storage
+      - MAX_WORKER_PROCESSES=3
+    volumes:
+      - ./storage:/workspace/storage
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
