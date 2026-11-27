@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import os
-import importlib.util
 import hashlib
-import sys
 from functools import lru_cache
 from pathlib import Path
 import time
@@ -17,6 +16,11 @@ import numpy as np
 from modules.image.adaptive import apply_conservative_unsharp_mask
 from modules.image.clahe_contrast import apply_clahe_contrast
 from modules.image.denoiser import apply_bilateral_denoise
+from modules.image.gpu_manager import (
+    get_vision_execution_context,
+    get_vision_inference_session,
+    move_torch_tensor_to_vision_device,
+)
 
 
 MODEL_REGISTRY = {
@@ -120,6 +124,21 @@ MODEL_REGISTRY = {
         "use_cases": ["portraits", "photographs", "skin and natural textures"],
         "avoid_for": "Real-time CPU processing or highly stylized artwork",
     },
+    "DarkIR (Low-Light Deblur)": {
+        "filename": "darkir.onnx",
+        "task": "low_light_restoration",
+        "native_scale": 1,
+        "sha256": None,
+        "spatial_multiple": 8,
+        "minimum_size": 32,
+        "source": "https://github.com/cidautai/DarkIR",
+        "license": "CC-BY-4.0 (official checkpoint)",
+        "availability_note": "The DarkIR downloader supplies DarkIR_384.pt; ONNX inference needs a separately exported darkir.onnx.",
+        "recommendation_label": "Low-light 1x restore",
+        "recommended_for": "Low-light enhancement and night blur recovery",
+        "use_cases": ["low-light photos", "night scenes", "shadow denoising"],
+        "avoid_for": "Daylight super-resolution upscaling",
+    },
 }
 
 
@@ -130,14 +149,18 @@ def _model_root() -> Path:
     return Path(__file__).resolve().parents[2] / "models" / "image_restoration"
 
 
-def get_neural_model_status(model_name: str) -> Dict[str, Any]:
-    """Return local weight/runtime readiness without importing ONNX Runtime."""
+def get_neural_model_status(
+    model_name: str,
+    *,
+    execution_context: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Return weight and ONNX provider readiness without constructing a session."""
     if model_name not in MODEL_REGISTRY:
         raise ValueError(f"Unsupported neural model: {model_name}")
     config = MODEL_REGISTRY[model_name]
     model_path = _model_root() / config["filename"]
     external_path = (
-        _model_root() / config["external_data"]
+        model_path.parent / config["external_data"]
         if config.get("external_data")
         else None
     )
@@ -155,26 +178,31 @@ def get_neural_model_status(model_name: str) -> Dict[str, Any]:
         integrity_valid = (
             _sha256(external_path) == config["external_data_sha256"]
         )
-    try:
-        runtime_available = importlib.util.find_spec("onnxruntime") is not None
-    except (ImportError, ValueError):
-        runtime_available = "onnxruntime" in sys.modules
-    available_providers = []
-    if runtime_available:
-        try:
-            import onnxruntime as ort
-
-            available_providers = list(ort.get_available_providers())
-        except (ImportError, OSError):
-            runtime_available = False
+    if execution_context is None:
+        execution_context = get_vision_execution_context()
+    elif "providers" not in execution_context:
+        execution_context = {**get_vision_execution_context(), **execution_context}
+    providers = [
+        provider for provider in execution_context["providers"]
+        if provider != "CUDAExecutionProvider" or execution_context.get("onnx_cuda_available", True)
+    ]
+    runtime_available = bool(providers)
+    onnx_cuda = "CUDAExecutionProvider" in providers
     return {
         "model_name": model_name,
         "model_path": str(model_path),
         "weights_available": weights_available,
         "integrity_valid": integrity_valid,
         "runtime_available": runtime_available,
-        "available_providers": available_providers,
-        "cuda_available": "CUDAExecutionProvider" in available_providers,
+        "available_providers": list(execution_context.get("available_providers", providers)),
+        "cuda_available": onnx_cuda,
+        "device": "cuda" if onnx_cuda else "cpu",
+        "device_name": (
+            execution_context.get("device_name", "ONNX Runtime CUDA GPU")
+            if onnx_cuda else "CPU Host"
+        ),
+        "providers": providers,
+        "execution_provider": providers[0] if providers else "unavailable",
         "task": config.get("task"),
         "native_scale": int(config.get("native_scale", 1)),
         "license": config.get("license", "unspecified"),
@@ -189,6 +217,15 @@ def get_neural_model_status(model_name: str) -> Dict[str, Any]:
         "availability_note": config.get("availability_note"),
         "ready": weights_available and integrity_valid and runtime_available,
     }
+
+
+def prepare_pytorch_vision_tensor(
+    tensor: Any,
+    execution_context: Mapping[str, Any] | None = None,
+) -> Any:
+    """Transfer future PyTorch vision inputs using the resolved CUDA policy."""
+
+    return move_torch_tensor_to_vision_device(tensor, execution_context)
 
 
 @lru_cache(maxsize=32)
@@ -276,7 +313,8 @@ def _fallback_result(
         ),
         "model_name": model_name,
         "scale_factor": scale_factor,
-        "device": device,
+        "requested_device": device,
+        "device": "cpu",
         "runtime": "opencv_fallback",
         "providers": [],
         "model_path": str(_model_root() / MODEL_REGISTRY[model_name]["filename"]),
@@ -288,7 +326,8 @@ def run_neural_restoration(
     image_bgr: np.ndarray,
     model_name: str,
     scale_factor: int = 2,
-    device: str = "cpu",
+    device: str | None = None,
+    execution_context: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Run a trusted ONNX restoration model or return an explicit OpenCV fallback."""
     started = time.perf_counter()
@@ -297,12 +336,14 @@ def run_neural_restoration(
         raise ValueError(f"Unsupported neural model: {model_name}")
     if scale_factor not in (1, 2, 4):
         raise ValueError("scale_factor must be 1, 2, or 4.")
-    device = str(device).lower()
-    if device not in {"cpu", "cuda"}:
-        raise ValueError("device must be 'cpu' or 'cuda'.")
-
-    model_path = _model_root() / MODEL_REGISTRY[model_name]["filename"]
-    model_status = get_neural_model_status(model_name)
+    if device is not None:
+        device = str(device).lower()
+        if device not in {"cpu", "cuda"}:
+            raise ValueError("device must be 'cpu' or 'cuda'.")
+    model_status = get_neural_model_status(model_name, execution_context=execution_context)
+    model_path = Path(model_status["model_path"])
+    if device is None:
+        device = model_status["device"]
     if model_status["fallback_only"]:
         return _fallback_result(
             image_bgr,
@@ -331,38 +372,26 @@ def run_neural_restoration(
             started,
         )
 
-    try:
-        import onnxruntime as ort
-    except (ImportError, OSError):
+    providers = [
+        provider for provider in model_status["providers"]
+        if provider == "CPUExecutionProvider" or device == "cuda"
+    ]
+    if not providers:
         return _fallback_result(
             image_bgr,
             model_name,
             scale_factor,
             device,
-            "onnxruntime_unavailable",
+            "cpu_provider_unavailable" if model_status["runtime_available"]
+            else "onnxruntime_unavailable",
             started,
         )
 
     try:
-        if device == "cuda" and hasattr(ort, "preload_dlls"):
-            ort.preload_dlls()
-        available = ort.get_available_providers()
-        requested = (
-            ["CUDAExecutionProvider", "CPUExecutionProvider"]
-            if device == "cuda"
-            else ["CPUExecutionProvider"]
-        )
-        providers = [provider for provider in requested if provider in available]
-        if not providers:
-            providers = ["CPUExecutionProvider"]
-        options = ort.SessionOptions()
-        options.intra_op_num_threads = 1
-        options.inter_op_num_threads = 1
-        options.log_severity_level = 3
-        session = ort.InferenceSession(
-            str(model_path),
-            sess_options=options,
-            providers=providers,
+        session = get_vision_inference_session(
+            model_path,
+            providers,
+            external_data=MODEL_REGISTRY[model_name].get("external_data"),
         )
         model_input = session.get_inputs()[0]
         if len(model_input.shape) != 4:
@@ -563,23 +592,30 @@ def run_neural_restoration(
             )
             restored_bgr = np.dstack([restored_bgr, resized_alpha])
 
+        # ORT can change providers during session creation or on the first run.
+        actual_providers = list(session.get_providers())
+        primary_provider = actual_providers[0] if actual_providers else "unavailable"
+        actual_device = "cuda" if primary_provider == "CUDAExecutionProvider" else "cpu"
+        provider_fallback = device == "cuda" and actual_device == "cpu"
+        message = f"Applied {model_name} using ONNX Runtime ({primary_provider})."
+        if provider_fallback:
+            message += " CUDA was requested; ONNX used CPU instead."
         return {
             "image_bgr": restored_bgr,
             "status": "success",
             "neural_applied": True,
             "fallback_applied": False,
             "fallback_reason": None,
-            "message": f"Applied {model_name} using ONNX Runtime.",
+            "message": message,
             "model_name": model_name,
             "scale_factor": scale_factor,
             "requested_device": device,
-            "device": (
-                "cuda"
-                if "CUDAExecutionProvider" in session.get_providers()
-                else "cpu"
-            ),
+            "device": actual_device,
             "runtime": "onnxruntime",
-            "providers": session.get_providers(),
+            "providers": actual_providers,
+            "provider_fallback": provider_fallback,
+            "device_name": model_status["device_name"] if actual_device == "cuda" else "CPU Host",
+            "execution_provider": primary_provider,
             "graph_scale": graph_scale,
             "native_scale": expected_native_scale,
             "post_resized": scale_factor != expected_native_scale,

@@ -15,9 +15,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import datetime
 import hashlib
-import io
+import ntpath
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+import tempfile
 import time
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
 
@@ -214,59 +215,68 @@ class DatasetManager:
         return self.scratch_dir
 
     def save_scratch_file(self, filename: str, content: Union[bytes, str, BinaryIO]) -> Path:
-        """
-        Writes transient data (e.g. upload buffers, generated chart images)
-        to the local scratch directory.
-        """
-        scratch_dir = self.get_scratch_dir()
-        # Prevent path traversal
-        safe_name = os.path.basename(filename)
-        if not safe_name or safe_name != filename or "../" in filename or "..\\" in filename:
-            raise ValueError(f"Invalid filename - path traversal detected: {filename}")
-        if os.path.isabs(filename):
-            raise ValueError(f"Invalid filename - absolute paths not allowed: {filename}")
-        target_path = (scratch_dir / safe_name).resolve()
-        scratch_dir_resolved = scratch_dir.resolve()
-        if not str(target_path).startswith(str(scratch_dir_resolved)):
-            raise ValueError(f"Invalid filename - path traversal detected: {filename}")
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+        """Atomically publish data or a stream's remainder, including an empty payload."""
+        target = self.get_scratch_file(filename)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as handle:
+                temporary = Path(handle.name)
 
-        if isinstance(content, bytes):
-            target_path.write_bytes(content)
-        elif isinstance(content, str):
-            target_path.write_text(content, encoding="utf-8")
-        elif hasattr(content, "read"):
-            pos = content.tell() if hasattr(content, "tell") else None
-            data = content.read()
-            if isinstance(data, str):
-                target_path.write_text(data, encoding="utf-8")
-            else:
-                target_path.write_bytes(data)
-            if pos is not None and hasattr(content, "seek"):
-                content.seek(pos)
-        else:
-            raise TypeError(f"Unsupported content type for scratch file: {type(content)}")
+                def write_chunk(chunk: Union[bytes, str]) -> None:
+                    data = chunk.encode("utf-8") if isinstance(chunk, str) else chunk
+                    if handle.write(data) != memoryview(data).nbytes:
+                        raise OSError("Incomplete scratch file write")
 
-        return target_path
+                if isinstance(content, (bytes, str)):
+                    write_chunk(content)
+                elif hasattr(content, "read"):
+                    try:
+                        pos = content.tell()
+                    except (AttributeError, OSError):
+                        pos = None
+                    try:
+                        while (chunk := content.read(1024 * 1024)) not in (b"", ""):
+                            if chunk is None:
+                                raise BlockingIOError("Scratch stream would block before EOF")
+                            write_chunk(chunk)
+                    finally:
+                        if pos is not None and hasattr(content, "seek"):
+                            content.seek(pos)
+                else:
+                    raise TypeError(f"Unsupported content type for scratch file: {type(content)}")
+            # Replace the directory entry; never truncate an existing linked file.
+            os.replace(temporary, target)
+            temporary = None
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return target
 
     def get_scratch_file(self, filename: str) -> Path:
-        """Returns the path to a scratch asset without checking existence."""
-        scratch_dir = self.get_scratch_dir()
-        safe_name = os.path.basename(filename)
-        if not safe_name or safe_name != filename or "../" in filename or "..\\" in filename:
-            raise ValueError(f"Invalid filename - path traversal detected: {filename}")
-        if os.path.isabs(filename):
-            raise ValueError(f"Invalid filename - absolute paths not allowed: {filename}")
-        target_path = (scratch_dir / safe_name).resolve()
-        scratch_dir_resolved = scratch_dir.resolve()
-        if not str(target_path).startswith(str(scratch_dir_resolved)):
-            raise ValueError(f"Invalid filename - path traversal detected: {filename}")
-        return target_path
+        """Strip benign upload folders; reject traversal, device names and redirected leaves."""
+        client_path = PureWindowsPath(filename)  # Accept both client separator styles on any host.
+        safe_name = Path(client_path.as_posix()).name
+        reserved = (ntpath.isreserved(safe_name) if hasattr(ntpath, "isreserved")
+                    else PureWindowsPath(safe_name).is_reserved())
+        if (not safe_name or client_path.anchor or ".." in client_path.parts or reserved
+                or ":" in safe_name or safe_name.endswith((" ", ".")) or "\x00" in filename):
+            raise ValueError("Path traversal security violation")
+
+        scratch_dir = self.get_scratch_dir().resolve()
+        candidate = scratch_dir / safe_name
+        if candidate.is_symlink():
+            raise ValueError("Path traversal security violation")
+        target = candidate.resolve()
+        if scratch_dir not in target.parents or target != candidate:
+            raise ValueError("Path traversal security violation")
+        return target
 
     def create_session_scratch(self, session_id: str) -> Path:
         """Creates an isolated scratch subdirectory for a given session."""
-        session_dir = self.get_scratch_dir() / session_id
-        session_dir.mkdir(parents=True, exist_ok=True)
+        session_dir = self.get_scratch_file(session_id)
+        if session_dir.name != session_id:
+            raise ValueError("Path traversal security violation")
+        session_dir.mkdir(exist_ok=True)
         return session_dir
 
     def cleanup_scratch(self, max_age_seconds: Optional[int] = None) -> int:

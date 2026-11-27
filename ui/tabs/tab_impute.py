@@ -21,6 +21,7 @@ from ui.theme import (
     render_plotly_artifact,
     section_header,
 )
+from ui.utils_ux import render_tab_guidance_header
 
 
 def _render_strategy_controls() -> tuple[str, dict, bool, bool, bool]:
@@ -188,12 +189,39 @@ def _render_imputation_preview(
     before_tab, after_tab, diff_tab = st.tabs(["🔴 Before", "🟢 After", "📋 Summary"])
 
     with before_tab:
+        render_tab_guidance_header(
+            title="Before Imputation",
+            objective="Find missing cells to compare against the imputed values.",
+            methodology=(
+                "Inspect the first 20 source rows for up to six retained columns that had nulls. "
+                "Use the row index and column name to locate the same cell in After."
+            ),
+            deliverable="A read-only baseline sample; a column can have missing values outside these rows.",
+        )
         st.dataframe(original_df[preview_cols].head(20), width="stretch", hide_index=False)
 
     with after_tab:
+        render_tab_guidance_header(
+            title="After Imputation",
+            objective="Check whether the estimated replacements are plausible for each feature.",
+            methodology=(
+                "Compare the same rows and columns with Before. Look for implausible magnitudes "
+                "or unexpected categories where a cell used to be null."
+            ),
+            deliverable="A sample of `v2_imputed` to inspect before anomaly detection; filled cells are estimates, not observations.",
+        )
         st.dataframe(imputed_df[preview_cols].head(20), width="stretch", hide_index=False)
 
     with diff_tab:
+        render_tab_guidance_header(
+            title="Imputation Summary",
+            objective="Check how many missing values remain across the full dataset, not just the sample.",
+            methodology=(
+                "For each retained column that had nulls, compare Nulls Before with Nulls After. "
+                "Filled is the difference; columns dropped during imputation are excluded."
+            ),
+            deliverable="Per-column fill counts and source types that identify features still needing attention.",
+        )
         summary_rows = []
         for col in imputed_cols:
             orig_nulls = int(original_df[col].isna().sum())
@@ -242,6 +270,19 @@ def render_impute_tab(
     bench_result : dict | None
         Benchmark results from MissingValueImputer.benchmark_dataset().
     """
+    render_tab_guidance_header(
+        title="Missing Value Imputation",
+        objective="Estimate missing values in the privacy-filtered dataset while keeping track of where data was absent.",
+        methodology=(
+            "Auto CV masks known numeric values to compare mean, median, KNN, and MICE Ridge by RMSE. "
+            "Categorical gaps use a classifier or a fallback. Optional indicators mark missing cells "
+            "in columns with at least 15% missingness."
+        ),
+        deliverable=(
+            "A new `v2_imputed` dataset with before/after counts. When benchmarks are available, "
+            "compare per-column errors before accepting the estimates."
+        ),
+    )
     if df is None or df.empty:
         st.info("Upload a dataset and run the Privacy Firewall first, then run Imputation.")
         return

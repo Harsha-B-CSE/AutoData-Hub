@@ -14,6 +14,7 @@ from ui.tabs_image.common import (
     decode_image_bytes,
     encode_image,
 )
+from ui.utils_ux import render_tab_guidance_header
 
 
 RESOLUTION_PRESETS = {
@@ -40,10 +41,17 @@ def _export_name(source_name: str, extension: str) -> str:
 
 def render_tab_export(uploaded_file) -> None:
     """Resize the processed image and provide individual or ZIP downloads."""
-    source_image = st.session_state.get("processed_image_bgr")
-    if source_image is None:
-        source_image = st.session_state.get("image_original_bgr")
-    if source_image is None:
+    render_tab_guidance_header(
+        title="Image Export Studio",
+        objective="Standardize image dimensions and export production-ready assets.",
+        methodology=(
+            "Applies aspect-preserving letterbox padding with selectable interpolation "
+            "(Lanczos/Bicubic/Bilinear/Nearest) and encodes PNG, JPEG, WEBP, or ZIP."
+        ),
+        deliverable="Resized individual image or batch-processed ZIP archive.",
+    )
+    buffer = st.session_state.get("image_buffer")
+    if buffer is None:
         st.info("Select and process an image before export.")
         return
 
@@ -123,6 +131,12 @@ def render_tab_export(uploaded_file) -> None:
             key="image_export_png_compression",
         )
 
+    options = (target_width, target_height, output_format, interpolation, pad_color_bgr, quality, png_compression)
+    if st.session_state.get("image_export_options") != options:
+        st.session_state["image_export_options"] = options
+        st.session_state.pop("image_export_result", None)
+        st.session_state.pop("image_export_zip_bytes", None)
+
     if st.button(
         "Prepare Resized Image",
         width="stretch",
@@ -130,7 +144,7 @@ def render_tab_export(uploaded_file) -> None:
     ):
         with st.spinner("Resizing and encoding image..."):
             resized = letterbox_resize(
-                source_image,
+                buffer.get_final_output(),
                 target_size=(target_width, target_height),
                 interpolation=interpolation,
                 fill_color=pad_color_bgr,
@@ -180,7 +194,7 @@ def render_tab_export(uploaded_file) -> None:
         width="stretch",
         key="image_build_zip",
     ):
-        processed_images = st.session_state.get("processed_images_bgr", {})
+        buffers = st.session_state["image_buffers"]
         archive_buffer = io.BytesIO()
         with st.spinner("Resizing and packaging image dataset..."):
             with zipfile.ZipFile(
@@ -190,9 +204,8 @@ def render_tab_export(uploaded_file) -> None:
                 compresslevel=6,
             ) as archive:
                 for item in source_items:
-                    image = processed_images.get(item["name"])
-                    if image is None:
-                        image = decode_image_bytes(item["bytes"])
+                    member = buffers.get(item["name"])
+                    image = member.get_final_output() if member is not None else decode_image_bytes(item["bytes"])
                     resized = letterbox_resize(
                         image,
                         target_size=(target_width, target_height),

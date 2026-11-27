@@ -15,6 +15,7 @@ import streamlit as st
 
 from core.schema_inference import ExecutionStatus, ModuleResult
 from ui.theme import COLORS, badge, kpi_row, section_header
+from ui.utils_ux import render_tab_guidance_header
 
 
 _PII_LABELS = {
@@ -49,6 +50,15 @@ def render_privacy_tab(
     transform_result : TransformResult | None
         Privacy TransformResult containing sanitized DataFrame.
     """
+    render_tab_guidance_header(
+        title="Privacy & PII Firewall",
+        objective="Find identifying values in `v0_raw` and mask them before imputation or modeling.",
+        methodology=(
+            "The scan checks value patterns and column names. Choose redaction to conceal the value, "
+            "session-salted SHA-256 hashes to retain matching identifiers, or synthetic pseudonyms."
+        ),
+        deliverable="A `v1_privacy` dataset, a list of detected fields, and matching raw/masked samples for review.",
+    )
     if df is None or df.empty:
         st.info("Upload a dataset to scan for PII and sensitive data.")
         return
@@ -291,8 +301,26 @@ def render_privacy_tab(
         if preview_cols:
             before_tab, after_tab = st.tabs(["🔴 Original (Raw)", "🟢 Sanitized"])
             with before_tab:
+                render_tab_guidance_header(
+                    title="Original PII Values",
+                    objective="Verify which source fields were flagged before masking. This view can expose raw identifiers.",
+                    methodology=(
+                        "Inspect the first 20 rows of up to six detected fields in `v0_raw`. "
+                        "Match the row index and field name in Sanitized; do not share this raw preview."
+                    ),
+                    deliverable="An unmodified reference sample for checking the masking result.",
+                )
                 st.dataframe(df[preview_cols].head(20), width="stretch", hide_index=False)
             with after_tab:
+                render_tab_guidance_header(
+                    title="Sanitized PII Values",
+                    objective="Check what the selected masking strategy actually changed.",
+                    methodology=(
+                        "Compare the same indexed cells in `v1_privacy` with Original (Raw). Check "
+                        "redactions, hashes, or pseudonyms against your intended use before sharing."
+                    ),
+                    deliverable="A masked sample for review, not proof that every sensitive field was detected.",
+                )
                 st.dataframe(sanitized_df[preview_cols].head(20), width="stretch", hide_index=False)
     elif sanitized_df is not None:
         st.markdown(section_header("✅ Sanitized Dataset Preview"), unsafe_allow_html=True)

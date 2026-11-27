@@ -19,9 +19,25 @@ from .sharpness_evaluator import (
 from .resizer import letterbox_resize
 from .clahe_contrast import apply_clahe_contrast
 from .denoiser import apply_bilateral_denoise, apply_gaussian_denoise
+from .gpu_manager import (
+    clear_vision_cache,
+    get_cached_hardware_context,
+    get_vision_execution_context,
+    get_vision_inference_session,
+    move_torch_tensor_to_vision_device,
+    run_pytorch_vision_forward,
+    vision_autocast_context,
+)
+from .color_engine import (
+    COLOR_GRADING_PRESETS,
+    apply_auto_white_balance,
+    apply_color_grading,
+    compute_white_balance_gains,
+)
 from .neural_restoration import (
     MODEL_REGISTRY,
     get_neural_model_status,
+    prepare_pytorch_vision_tensor,
     run_neural_restoration,
 )
 
@@ -51,7 +67,19 @@ __all__ = [
     "apply_clahe_contrast",
     "apply_bilateral_denoise",
     "apply_gaussian_denoise",
+    "clear_vision_cache",
+    "get_cached_hardware_context",
+    "get_vision_execution_context",
+    "get_vision_inference_session",
+    "move_torch_tensor_to_vision_device",
+    "run_pytorch_vision_forward",
+    "vision_autocast_context",
+    "COLOR_GRADING_PRESETS",
+    "apply_auto_white_balance",
+    "apply_color_grading",
+    "compute_white_balance_gains",
     "MODEL_REGISTRY",
     "get_neural_model_status",
+    "prepare_pytorch_vision_tensor",
     "run_neural_restoration",
 ]

@@ -28,6 +28,7 @@ from ui.theme import (
     render_plotly_artifact,
     section_header,
 )
+from ui.utils_ux import render_tab_guidance_header
 
 
 _THRESHOLD_OPTIONS = [
@@ -415,9 +416,27 @@ def _render_pca_scatter(module_result, transform_result, df: pd.DataFrame) -> No
     if pca_2d is not None:
         tab_2d, tab_3d = st.tabs(["2D Projection", "3D Projection (if available)"])
         with tab_2d:
+            render_tab_guidance_header(
+                title="2D Anomaly Projection",
+                objective="See where ensemble-flagged rows fall relative to the rest of the dataset.",
+                methodology=(
+                    "Each point is a row projected onto the first two principal components. "
+                    "Read the variance percentages on the axes and compare flagged crosses with normal points."
+                ),
+                deliverable="A map for investigating clusters and isolated rows. The ensemble, not the projection, sets the flags.",
+            )
             render_plotly_artifact(pca_2d, key_prefix="anomaly_pca_2d")
 
         with tab_3d:
+            render_tab_guidance_header(
+                title="3D Anomaly Projection",
+                objective="Check whether rows that overlap in 2D separate along a third component.",
+                methodology=(
+                    "With at least three rows and three eligible numeric features, the view robust-scales "
+                    "the features and fits a three-component PCA. Rotate the scatter to compare flagged and normal rows."
+                ),
+                deliverable="An interactive three-axis view of the same detections, without changing scores or mitigation.",
+            )
             # Try to build 3D if enough features
             try:
                 from sklearn.decomposition import PCA
@@ -722,6 +741,16 @@ def render_anomaly_tab(
     transform_result : TransformResult | None
         TransformResult containing the anomaly-annotated DataFrame (v3_anomaly).
     """
+    render_tab_guidance_header(
+        title="Anomaly Ensemble",
+        objective="Find unusual combinations of numeric values in `v2_imputed` and decide how to treat them.",
+        methodology=(
+            "Compare votes from Isolation Forest, Local Outlier Factor, and One-Class SVM using an "
+            "adaptive three-sigma or fixed quantile threshold. Review column clipping bounds before "
+            "winsorizing, or explicitly confirm pruning flagged rows."
+        ),
+        deliverable="The committed `v3_anomaly` dataset, with detector counts and PCA projections when available.",
+    )
     if df is None or df.empty:
         st.info("Upload a dataset and run Imputation first, then run Anomaly Detection.")
         return

@@ -29,6 +29,8 @@ def evaluate_sharpness_laplacian(
     threshold: float = 100.0,
 ) -> Dict[str, Any]:
     """Return focus telemetry and threshold classification for a BGR/BGRA image."""
+    if image_bgr is None or image_bgr.size == 0:
+        raise ValueError("A non-empty image is required.")
     if threshold < 0:
         raise ValueError("Sharpness threshold must be non-negative.")
     gray = _to_gray(image_bgr)
@@ -48,6 +50,8 @@ def evaluate_sharpness_laplacian(
 
 def evaluate_tenengrad(image_bgr: np.ndarray) -> float:
     """Return mean Sobel gradient magnitude (Tenengrad focus score)."""
+    if image_bgr is None or image_bgr.size == 0:
+        raise ValueError("A non-empty image is required.")
     gray = _to_gray(image_bgr)
     gradient_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
     gradient_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)

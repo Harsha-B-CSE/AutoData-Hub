@@ -20,6 +20,7 @@ from ui.theme import (
     render_plotly_artifact,
     section_header,
 )
+from ui.utils_ux import render_tab_guidance_header
 
 
 def _quality_grade_color(score: float) -> str:
@@ -53,6 +54,15 @@ def render_audit_tab(df: pd.DataFrame, module_result=None) -> None:
     module_result : ModuleResult | None
         Populated ModuleResult from modules.health_audit.auditor if pipeline ran.
     """
+    render_tab_guidance_header(
+        title="Data Health Audit",
+        objective="Quantify baseline dataset integrity before applying transformations.",
+        methodology=(
+            "Computes composite Quality Score Q across missingness, duplicate rows, "
+            "IQR outliers, and mixed-type errors without mutating the source data."
+        ),
+        deliverable="Quality grade card, missingness heatmap, and column schema profile.",
+    )
     if df is None or df.empty:
         st.info("Upload a dataset and run the Health Audit to see results here.")
         return

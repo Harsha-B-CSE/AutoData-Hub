@@ -38,6 +38,15 @@ DEFAULT_WEIGHT_MISSINGNESS = 0.35
 DEFAULT_WEIGHT_DUPLICATES = 0.20
 DEFAULT_WEIGHT_OUTLIERS = 0.25
 DEFAULT_WEIGHT_TYPE_ERRORS = 0.20
+EPSILON = 1e-9
+
+
+def _safe_ratio(numerator: Union[int, float], denominator: Union[int, float]) -> float:
+    """Return a finite ratio while preserving zero-denominator semantics."""
+
+    if float(denominator) <= 0.0:
+        return 0.0
+    return float(numerator) / max(float(denominator), EPSILON)
 
 
 class DataHealthAuditor:
@@ -66,11 +75,12 @@ class DataHealthAuditor:
 
         # Normalize weights if sum != 1.0
         total_w = self.w_missing + self.w_duplicate + self.w_outlier + self.w_type_error
-        if total_w > 0:
-            self.w_missing /= total_w
-            self.w_duplicate /= total_w
-            self.w_outlier /= total_w
-            self.w_type_error /= total_w
+        if total_w > EPSILON:
+            stable_total = max(total_w, EPSILON)
+            self.w_missing /= stable_total
+            self.w_duplicate /= stable_total
+            self.w_outlier /= stable_total
+            self.w_type_error /= stable_total
 
     def audit(
         self,
@@ -201,13 +211,13 @@ class DataHealthAuditor:
         """Vectorized missingness calculation per column and across dataset."""
         null_series = df.isna().sum()
         total_missing = int(null_series.sum())
-        missing_ratio = float(total_missing / total_cells) if total_cells > 0 else 0.0
+        missing_ratio = _safe_ratio(total_missing, total_cells)
 
         row_count = len(df)
         col_missing: Dict[str, Dict[str, Any]] = {}
         for col in df.columns:
             n_count = int(null_series[col])
-            n_pct = round(float((n_count / row_count) * 100.0), 2) if row_count > 0 else 0.0
+            n_pct = round(_safe_ratio(n_count, row_count) * 100.0, 2)
             col_missing[str(col)] = {
                 "null_count": n_count,
                 "null_pct": n_pct,
@@ -224,7 +234,7 @@ class DataHealthAuditor:
         hashable_df = df.apply(lambda series: series.map(_hashable_value))
         dup_series = hashable_df.duplicated()
         duplicate_count = int(dup_series.sum())
-        duplicate_ratio = float(duplicate_count / row_count) if row_count > 0 else 0.0
+        duplicate_ratio = _safe_ratio(duplicate_count, row_count)
         return duplicate_count, duplicate_ratio
 
     def _calculate_outliers(
@@ -259,7 +269,7 @@ class DataHealthAuditor:
                     continue
 
                 variance = float(non_null.var()) if n_count > 1 else 0.0
-                if variance == 0.0 or non_null.nunique() <= 1:
+                if abs(variance) <= EPSILON or non_null.nunique() <= 1:
                     zero_var_cols.append(str(col))
 
                 # Quantile calculation
@@ -270,7 +280,7 @@ class DataHealthAuditor:
                 lower_bound = q1 - 1.5 * iqr
                 upper_bound = q3 + 1.5 * iqr
 
-                if iqr == 0.0 and variance == 0.0:
+                if abs(iqr) <= EPSILON and abs(variance) <= EPSILON:
                     # Constant column has 0 outliers
                     outlier_count = 0
                 else:
@@ -290,7 +300,7 @@ class DataHealthAuditor:
                     "variance": round(variance, 4),
                 }
 
-        outlier_ratio = float(total_outliers / total_numeric_cells) if total_numeric_cells > 0 else 0.0
+        outlier_ratio = _safe_ratio(total_outliers, total_numeric_cells)
         return total_outliers, outlier_ratio, col_outliers, zero_var_cols
 
     def _calculate_type_errors(
@@ -328,7 +338,7 @@ class DataHealthAuditor:
                     str_non_null = non_null.astype(str)
                     numeric_attempt = pd.to_numeric(str_non_null, errors="coerce")
                     valid_num_count = int(numeric_attempt.notna().sum())
-                    num_ratio = valid_num_count / len(non_null)
+                    num_ratio = _safe_ratio(valid_num_count, len(non_null))
 
                     # If majority (>=50%) parse as numbers, non-numeric strings are type mismatches
                     if 0.5 <= num_ratio < 1.0:
@@ -339,7 +349,7 @@ class DataHealthAuditor:
             else:
                 col_type_errors[col_str] = 0
 
-        type_error_ratio = float(total_type_errors / total_cells) if total_cells > 0 else 0.0
+        type_error_ratio = _safe_ratio(total_type_errors, total_cells)
         return total_type_errors, type_error_ratio, col_type_errors
 
     def _calculate_quality_score(
@@ -401,7 +411,7 @@ class DataHealthAuditor:
             series = df[col]
             non_null = series.dropna()
             unique_count = int(non_null.map(_hashable_value).nunique())
-            card_ratio = round(float(unique_count / len(non_null)), 4) if len(non_null) > 0 else 0.0
+            card_ratio = round(_safe_ratio(unique_count, len(non_null)), 4)
 
             # Safe sample values
             sample_vals = non_null.head(3).tolist()
@@ -593,7 +603,7 @@ class DataHealthAuditor:
                 "quality_score": 0.0,
                 "quality_grade": "F",
                 "penalty_breakdown": {},
-                "row_count": 0,
+                "row_count": 0 if df is None else int(len(df)),
                 "column_count": 0 if df is None else len(df.columns),
                 "total_cells": 0,
                 "missing_count": 0,

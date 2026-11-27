@@ -1,4 +1,11 @@
 -r requirements.txt
 
+--extra-index-url https://download.pytorch.org/whl/cu130
+
 # NVIDIA CUDA 13 + cuDNN 9 ONNX Runtime. Do not install with onnxruntime CPU.
 onnxruntime-gpu[cuda,cudnn]==1.31.1
+
+# Keep the PyTorch family paired with ONNX Runtime's CUDA 13 runtime.
+torch==2.10.0+cu130
+torchvision==0.25.0+cu130
+torchaudio==2.10.0+cu130

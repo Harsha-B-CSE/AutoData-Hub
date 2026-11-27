@@ -19,6 +19,7 @@ import streamlit as st
 
 from core.dataset_manager import DatasetManager
 from ui.theme import COLORS, badge, section_header
+from ui.utils_ux import render_tab_guidance_header
 
 
 _PDF_REPORT_STYLE_VERSION = 2
@@ -386,6 +387,15 @@ def render_export_tab(
     audit_logs: list
 ) -> None:
     """Renders Export & Versioning Studio (Tab 5)."""
+    render_tab_guidance_header(
+        title="Export & Versioning Studio",
+        objective="Export cleaned datasets, audit documentation, and reproducible code.",
+        methodology=(
+            "Compiles the immutable TransformationAction ledger into standalone "
+            "pipeline.py scripts, ReportLab PDF executive reports, and Parquet/CSV/XLSX."
+        ),
+        deliverable="Downloadable cleaned dataset, audit_report.pdf, and pipeline.py.",
+    )
     st.markdown("# 📤 Export & Versioning Studio", unsafe_allow_html=True)
 
     _render_action_queue()

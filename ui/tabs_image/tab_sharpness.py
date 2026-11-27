@@ -8,14 +8,25 @@ from modules.image.sharpness_evaluator import (
     evaluate_sharpness_laplacian,
 )
 from ui.tabs_image.common import bgr_to_display
+from ui.utils_ux import render_tab_guidance_header
 
 
 def render_tab_sharpness(uploaded_file) -> None:
     """Render Laplacian variance and Tenengrad focus diagnostics."""
-    image_bgr = st.session_state.get("image_original_bgr")
-    if image_bgr is None:
+    render_tab_guidance_header(
+        title="Focus & Sharpness Profiling",
+        objective="Identify blur, motion softness, and low-light exposure issues.",
+        methodology=(
+            "Evaluates spatial Laplacian variance Var(∇²I), Sobel Tenengrad "
+            "gradient energy, and mean luminance against user-tuned thresholds."
+        ),
+        deliverable="Automated sharpness verdict and restoration tier recommendation.",
+    )
+    buffer = st.session_state.get("image_buffer")
+    if buffer is None:
         st.info("Select a decodable image to run sharpness evaluation.")
         return
+    image_bgr = buffer.raw_bgr
 
     cutoff = st.slider(
         "Laplacian Variance Cutoff: var(∇²I)",
@@ -26,7 +37,9 @@ def render_tab_sharpness(uploaded_file) -> None:
         key="image_sharpness_cutoff",
         help="Images below this threshold are classified as blurry.",
     )
-    telemetry = evaluate_sharpness_laplacian(image_bgr, threshold=cutoff)
+    if "image_focus_metrics" not in st.session_state:
+        st.session_state["image_focus_metrics"] = evaluate_sharpness_laplacian(image_bgr)
+    telemetry = st.session_state["image_focus_metrics"]
     laplacian_variance = telemetry["laplacian_variance"]
     tenengrad_score = telemetry["tenengrad_score"]
     mean_luminance = telemetry["mean_luminance"]
@@ -36,7 +49,7 @@ def render_tab_sharpness(uploaded_file) -> None:
     metric2.metric("Tenengrad Score", f"{tenengrad_score:,.2f}")
     metric3.metric("Mean Luminance", f"{mean_luminance:,.2f}")
 
-    if telemetry["is_blurry"]:
+    if laplacian_variance < cutoff:
         st.warning(
             f"BLURRY: Laplacian variance {laplacian_variance:.2f} is below "
             f"the selected cutoff {cutoff:.2f}."
@@ -53,7 +66,7 @@ def render_tab_sharpness(uploaded_file) -> None:
             "Image is dark. Recommended restoration: Tier-1 LAB CLAHE with "
             "bilateral denoising."
         )
-    elif telemetry["is_blurry"]:
+    elif laplacian_variance < cutoff:
         recommended = (
             "Restormer (High-Res Deblur)"
             if laplacian_variance < cutoff * 0.5

@@ -19,12 +19,15 @@ import pandas as pd
 
 from core.dataset_manager import DatasetManager
 from ui.theme import COLORS, badge, section_header
+from ui.utils_ux import render_tab_guidance_header
 
 
 TABULAR_UPLOAD_TYPES = [
     "csv", "tsv", "xlsx", "xls", "parquet", "feather", "json", "jsonl"
 ]
 IMAGE_UPLOAD_TYPES = ["zip", "png", "jpg", "jpeg", "webp"]
+VOICE_UPLOAD_TYPES = ["wav", "mp3", "flac", "ogg", "m4a"]
+VIDEO_UPLOAD_TYPES = ["mp4", "avi", "mov", "mkv", "webm"]
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +50,12 @@ def _init_session_state() -> None:
         "processed_image_fingerprint": None,
         "image_uploader_had_file": False,
         "image_dataset": None,
+        "processed_voice_fingerprint": None,
+        "voice_uploader_had_file": False,
+        "voice_dataset": None,
+        "processed_video_fingerprint": None,
+        "video_uploader_had_file": False,
+        "video_dataset": None,
         "active_modality": "tabular",
         "modality_selector": "tabular",
         "privacy_session_salt": None,
@@ -79,10 +88,16 @@ def _clear_workspace_data() -> None:
     st.session_state["privacy_session_salt"] = None
     st.session_state["pipeline_ran"] = False
     st.session_state["image_dataset"] = None
+    st.session_state["voice_dataset"] = None
+    st.session_state["video_dataset"] = None
     st.session_state["processed_upload_fingerprint"] = None
     st.session_state["processed_image_fingerprint"] = None
+    st.session_state["processed_voice_fingerprint"] = None
+    st.session_state["processed_video_fingerprint"] = None
     st.session_state["uploader_had_file"] = False
     st.session_state["image_uploader_had_file"] = False
+    st.session_state["voice_uploader_had_file"] = False
+    st.session_state["video_uploader_had_file"] = False
     for key in (
         "pdf_bytes_cache",
         "pdf_filename_cache",
@@ -93,14 +108,78 @@ def _clear_workspace_data() -> None:
         "version_selector",
         "image_source_fingerprint",
         "image_source_items",
+        "image_source_error",
+        "image_buffer",
+        "image_buffers",
+        "image_focus_metrics",
+        "image_sync_color_widgets",
         "image_selected_name",
-        "image_original_bgr",
         "processed_image_bgr",
-        "processed_images_bgr",
         "image_restoration_metadata",
         "image_export_result",
+        "image_export_options",
         "image_export_zip_bytes",
         "image_member_selector",
+        "voice_source_fingerprint",
+        "voice_raw_audio",
+        "voice_raw_sample_rate",
+        "voice_source_metadata",
+        "voice_enhanced_audio",
+        "voice_enhanced_sample_rate",
+        "voice_transform_result",
+        "voice_module_result",
+        "voice_processing_mode",
+        "voice_attenuation_db",
+        "voice_bandwidth_extension",
+        "voice_input_source",
+        "voice_live_attenuation_db",
+        "voice_live_boost_db",
+        "voice_boost_db",
+        "voice_execution_mode",
+        "voice_tuned_audio",
+        "voice_tuned_sample_rate",
+        "voice_tuner_low_db",
+        "voice_tuner_mid_db",
+        "voice_tuner_high_db",
+        "voice_studio_preset",
+        "voice_studio_highpass",
+        "voice_studio_highpass_enabled",
+        "voice_studio_low_shelf_freq",
+        "voice_studio_low_mid_gain",
+        "voice_studio_low_mid_freq",
+        "voice_studio_low_mid_q",
+        "voice_studio_mid_freq",
+        "voice_studio_mid_q",
+        "voice_studio_presence_gain",
+        "voice_studio_presence_freq",
+        "voice_studio_presence_q",
+        "voice_studio_high_shelf_freq",
+        "voice_studio_deess_enabled",
+        "voice_studio_deess_threshold",
+        "voice_studio_deess_amount",
+        "voice_studio_deess_attack",
+        "voice_studio_deess_release",
+        "voice_studio_deess_knee",
+        "voice_studio_comp_enabled",
+        "voice_studio_comp_ratio",
+        "voice_studio_comp_threshold",
+        "voice_studio_comp_knee",
+        "voice_studio_comp_attack",
+        "voice_studio_comp_release",
+        "voice_studio_comp_makeup",
+        "voice_studio_sat_type",
+        "voice_studio_sat_drive",
+        "voice_studio_limiter_ceiling",
+        "voice_export_sample_rate",
+        "voice_export_bit_depth",
+        "voice_export_format",
+        "video_source_fingerprint",
+        "video_transform_result",
+        "video_stride",
+        "video_scene_thresh",
+        "video_ema_alpha",
+        "video_color_preset",
+        "video_color_inspect_idx",
     ):
         st.session_state.pop(key, None)
 
@@ -125,11 +204,12 @@ def _activate_raw_dataset(df: pd.DataFrame, filename: str) -> None:
     st.session_state["privacy_session_salt"] = None
 
 
-def _activate_image_dataset(payload: bytes, filename: str) -> None:
+def _activate_image_dataset(payload: bytes, filename: str, upload_id: str) -> None:
     """Persist an image or ZIP upload without entering the tabular pipeline."""
     _clear_workspace_data()
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     st.session_state["image_dataset"] = {
+        "upload_id": upload_id,
         "filename": filename,
         "extension": extension,
         "bytes": payload,
@@ -137,6 +217,36 @@ def _activate_image_dataset(payload: bytes, filename: str) -> None:
     }
     st.session_state["current_filename"] = filename
     st.session_state["active_modality"] = "image"
+
+
+def _activate_voice_dataset(payload: bytes, filename: str) -> None:
+    """Persist an audio upload without entering the tabular pipeline."""
+    _clear_workspace_data()
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    st.session_state["voice_dataset"] = {
+        "filename": filename,
+        "extension": extension,
+        "bytes": payload,
+        "size_bytes": len(payload),
+    }
+    st.session_state["current_filename"] = filename
+    st.session_state["active_modality"] = "voice"
+
+
+def _activate_video_dataset(uploaded_file, upload_id: str) -> None:
+    """Persist a video upload without entering the tabular pipeline."""
+    _clear_workspace_data()
+    filename = uploaded_file.name
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    st.session_state["video_dataset"] = {
+        "filename": filename,
+        "extension": extension,
+        "upload_id": upload_id,
+        "source": uploaded_file,
+        "size_bytes": uploaded_file.size,
+    }
+    st.session_state["current_filename"] = filename
+    st.session_state["active_modality"] = "video"
 
 
 def render_sidebar_ingestion(
@@ -147,15 +257,22 @@ def render_sidebar_ingestion(
 
     selected_modality = st.radio(
         "Data Modality",
-        options=["tabular", "image"],
-        format_func=lambda value: "Tabular" if value == "tabular" else "Image",
-        horizontal=True,
+        options=["tabular", "image", "voice", "video"],
+        format_func=lambda value: {
+            "tabular": "📊 Tabular Datasets",
+            "image": "🖼️ Image Datasets",
+            "voice": "🎙️ Voice / Audio",
+            "video": "📹 Video Media",
+        }[value],
+        horizontal=False,
         key="modality_selector",
     )
     if selected_modality != st.session_state.get("active_modality"):
         _clear_workspace_data()
         st.session_state.pop("file_uploader_tabular", None)
         st.session_state.pop("file_uploader_image", None)
+        st.session_state.pop("file_uploader_voice", None)
+        st.session_state.pop("file_uploader_video", None)
         st.session_state["active_modality"] = selected_modality
         st.rerun()
 
@@ -175,7 +292,6 @@ def render_sidebar_ingestion(
                 st.rerun()
             return
 
-        payload = uploaded.getvalue()
         st.session_state["image_uploader_had_file"] = True
         detected = (
             detect_file_modality(uploaded.name)
@@ -185,17 +301,94 @@ def render_sidebar_ingestion(
         if detected != "image":
             st.error("The selected file is not a supported image dataset.")
             return
-        upload_identity = f"image:{uploaded.name}:{hashlib.sha256(payload).hexdigest()}"
+        upload_identity = f"image:{uploaded.file_id}:{uploaded.name}:{uploaded.size}"
         if st.session_state.get("processed_image_fingerprint") != upload_identity:
             with st.spinner(f"Loading {uploaded.name}..."):
-                _activate_image_dataset(payload, uploaded.name)
+                _activate_image_dataset(uploaded.getvalue(), uploaded.name, upload_identity)
                 st.session_state["processed_image_fingerprint"] = upload_identity
                 st.session_state["image_uploader_had_file"] = True
             st.rerun()
         return
 
+    if selected_modality == "voice":
+        uploaded = st.file_uploader(
+            "Upload voice or audio file",
+            type=VOICE_UPLOAD_TYPES,
+            key="file_uploader_voice",
+            label_visibility="collapsed",
+            help="Supported: WAV, MP3, FLAC, OGG, M4A",
+        )
+        if uploaded is None:
+            st.session_state["processed_voice_fingerprint"] = None
+            if st.session_state.get("voice_uploader_had_file", False):
+                _clear_workspace_data()
+                st.session_state["active_modality"] = "voice"
+                st.rerun()
+            return
+
+        st.session_state["voice_uploader_had_file"] = True
+        detected = (
+            detect_file_modality(uploaded.name)
+            if detect_file_modality is not None
+            else "voice"
+        )
+        if detected != "voice":
+            st.error("The selected file is not a supported voice/audio asset.")
+            return
+        upload_identity = f"voice:{uploaded.file_id}:{uploaded.name}:{uploaded.size}"
+        if st.session_state.get("processed_voice_fingerprint") != upload_identity:
+            with st.spinner(f"Loading {uploaded.name}..."):
+                _activate_voice_dataset(uploaded.getvalue(), uploaded.name)
+                st.session_state["processed_voice_fingerprint"] = upload_identity
+                st.session_state["voice_uploader_had_file"] = True
+            st.rerun()
+        return
+
+    if selected_modality == "video":
+        uploaded = st.file_uploader(
+            "Upload video media",
+            type=VIDEO_UPLOAD_TYPES,
+            key="file_uploader_video",
+            label_visibility="collapsed",
+            help="Supported: MP4, AVI, MOV, MKV, WEBM",
+        )
+        if uploaded is None:
+            st.session_state["processed_video_fingerprint"] = None
+            if st.session_state.get("video_uploader_had_file", False):
+                _clear_workspace_data()
+                st.session_state["active_modality"] = "video"
+                st.rerun()
+            return
+
+        st.session_state["video_uploader_had_file"] = True
+        detected = (
+            detect_file_modality(uploaded.name)
+            if detect_file_modality is not None
+            else "video"
+        )
+        if detected != "video":
+            st.error("The selected file is not a supported video asset.")
+            return
+        upload_identity = f"video:{uploaded.file_id}:{uploaded.name}:{uploaded.size}"
+        if st.session_state.get("processed_video_fingerprint") != upload_identity:
+            with st.spinner(f"Loading {uploaded.name}..."):
+                _activate_video_dataset(uploaded, upload_identity)
+                st.session_state["processed_video_fingerprint"] = upload_identity
+                st.session_state["video_uploader_had_file"] = True
+            st.rerun()
+        return
+
     upload_tab, db_tab = st.tabs(["File Upload", "Database"])
     with upload_tab:
+        render_tab_guidance_header(
+            title="File Upload",
+            objective="Start a tabular audit from a local dataset.",
+            methodology=(
+                "Choose a CSV, TSV, Excel, Parquet, Feather, JSON, or JSONL file. "
+                "Ingestion normalizes text and null markers and parses detected date columns."
+            ),
+            deliverable="A new `v0_raw` baseline for Health Audit. Loading a new source replaces prior versions.",
+        )
         uploaded = st.file_uploader(
             "Upload tabular dataset",
             type=TABULAR_UPLOAD_TYPES,
@@ -247,6 +440,15 @@ def render_sidebar_ingestion(
                             st.rerun()
 
     with db_tab:
+        render_tab_guidance_header(
+            title="Database",
+            objective="Audit a table or a selected subset of a relational database.",
+            methodology=(
+                "Enter a SQLAlchemy URL for a read-only account and a table name or SELECT query. "
+                "Select only needed rows and columns, then choose Connect & Load."
+            ),
+            deliverable="The returned rows become `v0_raw` in this workspace, replacing any previous dataset.",
+        )
         conn_str = st.text_input(
             "SQLAlchemy Connection String",
             placeholder="postgresql+psycopg2://user:pass@host/db",
@@ -401,6 +603,38 @@ def _render_image_panel() -> None:
     col2.metric("Size", f"{asset['size_bytes'] / (1024 * 1024):.2f} MB")
 
 
+def _render_voice_panel() -> None:
+    asset = st.session_state.get("voice_dataset")
+    if not asset:
+        st.markdown(
+            f'<p style="color:{COLORS["text_muted"]};font-size:0.8rem;">'
+            "No voice/audio file loaded yet.</p>",
+            unsafe_allow_html=True,
+        )
+        return
+    st.markdown(section_header("🎙️ Voice / Audio"), unsafe_allow_html=True)
+    st.caption(asset["filename"])
+    col1, col2 = st.columns(2)
+    col1.metric("Format", asset["extension"].upper())
+    col2.metric("Size", f"{asset['size_bytes'] / (1024 * 1024):.2f} MB")
+
+
+def _render_video_panel() -> None:
+    asset = st.session_state.get("video_dataset")
+    if not asset:
+        st.markdown(
+            f'<p style="color:{COLORS["text_muted"]};font-size:0.8rem;">'
+            "No video media loaded yet.</p>",
+            unsafe_allow_html=True,
+        )
+        return
+    st.markdown(section_header("📹 Video Media"), unsafe_allow_html=True)
+    st.caption(asset["filename"])
+    col1, col2 = st.columns(2)
+    col1.metric("Format", asset["extension"].upper())
+    col2.metric("Size", f"{asset['size_bytes'] / (1024 * 1024):.2f} MB")
+
+
 def render_sidebar(
     detect_file_modality: Optional[Callable[[str], Optional[str]]] = None,
 ) -> Optional[pd.DataFrame]:
@@ -441,8 +675,12 @@ def render_sidebar(
         # ── Version Panel ─────────────────────────────────────────────────
         if st.session_state.get("active_modality") == "tabular":
             _render_version_panel()
-        else:
+        elif st.session_state.get("active_modality") == "image":
             _render_image_panel()
+        elif st.session_state.get("active_modality") == "voice":
+            _render_voice_panel()
+        else:
+            _render_video_panel()
 
         st.markdown("<br>", unsafe_allow_html=True)
 

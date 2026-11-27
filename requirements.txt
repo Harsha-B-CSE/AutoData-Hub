@@ -1,6 +1,6 @@
 # Supported Python: 3.11-3.13 (64-bit). Python 3.12 is recommended broadly.
 fastapi>=0.110.0,<1.0
-uvicorn>=0.28.0,<1.0
+uvicorn>=0.52.0,<1.0
 pydantic>=2.6.0,<3.0
 sqlalchemy>=2.0.28,<3.0
 pandas==2.3.1  # Policy-approved wheel; pandas 3.1.0 is blocked by Smart App Control.
@@ -17,7 +17,11 @@ pytest>=8.0.0,<10.0
 httpx>=0.27.0,<3.0
 pypdf==7.1.1
 streamlit==1.66.1
+streamlit-webrtc>=0.63.0,<1.0
 plotly==7.1.0
+soundfile>=0.13.1,<1.0
+av>=14.0.0,<20.0
+pystoi>=0.4.1,<1.0
 pyarrow==23.0.1  # Provides Parquet/Feather and includes the Arrow IPC security fix.
 psycopg2-binary==2.9.12  # Policy-approved PostgreSQL driver build.
 pymysql>=1.1.0,<2.0
@@ -25,6 +29,7 @@ python-dotenv>=1.0.0,<2.0
 chardet>=5.2.0,<8.0
 xlrd>=2.0.1,<3.0
 
-# SUPIR is intentionally excluded. It requires a separate high-VRAM PyTorch,
-# SDXL/CLIP/LLaVA diffusion service with restrictive model terms. The main
-# application does not require torch, torchvision, diffusers, xformers, or triton.
+# Native PESQ is detected when installed; its source extension has no reliable
+# wheel across every supported Python version, so telemetry has an audited
+# heuristic fallback. Torch/TorchAudio are selected by the CPU/GPU profiles.
+# SUPIR remains excluded because it requires a separate diffusion service.

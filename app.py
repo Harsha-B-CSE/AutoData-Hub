@@ -25,6 +25,8 @@ TABULAR_EXTENSIONS = {
     ".jsonl",
 }
 IMAGE_EXTENSIONS = {".zip", ".png", ".jpg", ".jpeg", ".webp"}
+AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
+VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 
 
 def detect_file_modality(file_name: str) -> str | None:
@@ -34,6 +36,10 @@ def detect_file_modality(file_name: str) -> str | None:
         return "tabular"
     if extension in IMAGE_EXTENSIONS:
         return "image"
+    if extension in AUDIO_EXTENSIONS:
+        return "voice"
+    if extension in VIDEO_EXTENSIONS:
+        return "video"
     return None
 
 
@@ -206,9 +212,30 @@ def main() -> None:
         else:
             _render_image_workspace(image_dataset)
         return
+    elif active_modality == "voice":
+        uploaded_file = st.session_state.get("voice_dataset")
+        _render_voice_workspace(uploaded_file)
+        return
+    elif active_modality == "video":
+        video_dataset = st.session_state.get("video_dataset")
+        if video_dataset is None:
+            _render_landing_page(active_modality="video")
+        else:
+            _render_video_workspace(video_dataset)
+        return
 
-    # ── Determine Active Dataset ─────────────────────────────────────────────
+    render_tabular_app(st.session_state.get("dataset_versions"))
+
+
+def render_tabular_app(uploaded_file=None) -> None:
+    """Render the 5-stage Tabular MLOps preprocessing workspace."""
     if (
+        isinstance(uploaded_file, dict)
+        and "v0_raw" in uploaded_file
+        and uploaded_file.get("v0_raw") is not None
+    ):
+        versions = uploaded_file
+    elif (
         "v0_raw" in st.session_state.get("dataset_versions", {})
         and st.session_state.get("dataset_versions")["v0_raw"] is not None
     ):
@@ -301,6 +328,22 @@ def _render_image_workspace(image_dataset: dict) -> None:
     render_image_app(image_dataset)
 
 
+def _render_voice_workspace(uploaded_file: dict | None) -> None:
+    """Render the dual-tier audio and speech enhancement workspace."""
+    from ui.tabs_voice.main_layout import render_voice_app
+
+    st.title("🎙️ Dual-Tier Audio & Speech Enhancement Engine")
+    render_voice_app(uploaded_file)
+
+
+def _render_video_workspace(video_dataset: dict | None) -> None:
+    """Render the streamed video diagnostics and temporal color grading workspace."""
+    from ui.tabs_video.main_layout import render_video_app
+
+    st.title("📹 Streamed Video Processing & Temporal Color Engine")
+    render_video_app(video_dataset)
+
+
 def _render_landing_page(active_modality: str = "tabular") -> None:
     """Renders the landing page when no dataset is loaded."""
     if active_modality == "image":
@@ -313,6 +356,38 @@ def _render_landing_page(active_modality: str = "tabular") -> None:
                             background-clip:text;margin-bottom:1rem;">Image Workspace</div>
                 <div style="font-size:1.1rem;color:{COLORS['text_muted']};">
                     Upload ZIP, PNG, JPG, JPEG, or WEBP from the sidebar.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+    if active_modality == "voice":
+        st.markdown(
+            f"""
+            <div style="text-align:center;padding:4rem 2rem;">
+                <div style="font-size:3rem;font-weight:800;
+                            background:linear-gradient(135deg,{COLORS['accent']},#8B5CF6);
+                            -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+                            background-clip:text;margin-bottom:1rem;">Voice Workspace</div>
+                <div style="font-size:1.1rem;color:{COLORS['text_muted']};">
+                    Upload WAV, MP3, FLAC, OGG, or M4A audio from the sidebar.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+    if active_modality == "video":
+        st.markdown(
+            f"""
+            <div style="text-align:center;padding:4rem 2rem;">
+                <div style="font-size:3rem;font-weight:800;
+                            background:linear-gradient(135deg,{COLORS['accent']},#8B5CF6);
+                            -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+                            background-clip:text;margin-bottom:1rem;">Video Workspace</div>
+                <div style="font-size:1.1rem;color:{COLORS['text_muted']};">
+                    Upload MP4, AVI, MOV, MKV, or WEBM media from the sidebar.
                 </div>
             </div>
             """,

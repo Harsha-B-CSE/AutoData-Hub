@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 import cv2
 from pathlib import Path
@@ -6,6 +5,8 @@ from backend.engines.image.profiler import compute_laplacian_variance
 from backend.engines.image.transforms import resize_image, crop_image, rotate_image, flip_image
 from backend.engines.image.filters import convert_color_space, apply_filter, enhance_contrast
 from backend.engines.image.augmentor import augment_image
+
+SYNTHETIC_PALACE = Path(__file__).resolve().parent / "fixtures" / "Mysore_palace_illuminated.jpg"
 
 def test_laplacian_sharpness():
     # Crisp image with high contrast edges
@@ -100,14 +101,12 @@ def test_mysore_palace_color_preservation():
     assert enhanced[:, :, 2].mean() > enhanced[:, :, 0].mean()
     assert enhanced[:, :, 2].mean() > enhanced[:, :, 1].mean()
 
-    # If Mysore palace test file exists on disk, test real image as well
-    real_path = Path("storage/raw/7132dd25-c3f4-42da-b297-650b44a606f9/Mysore_palace_illuminated.jpg")
-    if real_path.exists():
-        real_img = cv2.imread(str(real_path))
-        real_denoised = apply_filter(real_img, filter_type="bilateral", kernel_size=5)
-        real_enhanced = enhance_contrast(real_denoised, method="clahe", clip_limit=2.0)
-        # Verify Red > Blue
-        assert real_enhanced[:, :, 2].mean() > real_enhanced[:, :, 0].mean()
+    # Exercise the same operations on the synthetic golden night scene.
+    scene = cv2.imread(str(SYNTHETIC_PALACE))
+    assert scene is not None, f"Cannot read synthetic fixture: {SYNTHETIC_PALACE}"
+    denoised = apply_filter(scene, filter_type="bilateral", kernel_size=5)
+    enhanced = enhance_contrast(denoised, method="clahe", clip_limit=2.0)
+    assert enhanced[:, :, 2].mean() > enhanced[:, :, 0].mean()
 
 def test_clahe_luminance_only_preserves_chrominance():
     """
@@ -260,19 +259,16 @@ def test_adaptive_enhancement_presets_scaling():
 
 def test_mysore_palace_adaptive_pipeline():
     """
-    Verifies adaptive pipeline specifically on Mysore Palace:
-    - Recognizes night capture (low light luminance)
+    Verifies the adaptive pipeline on a synthetic golden-lit night scene:
+    - Recognizes low light luminance
     - Applies gamma shadow lift and contrast enhancement
-    - Skips unsharp mask because focus is already sharp (> 1000)
+    - Skips unsharp mask because the illuminated arches are already sharp
     - Strictly preserves warm golden lighting (Red > Blue)
     """
     from backend.engines.image.adaptive import analyze_image_characteristics, adaptive_enhance_image
 
-    real_path = Path("storage/raw/7132dd25-c3f4-42da-b297-650b44a606f9/Mysore_palace_illuminated.jpg")
-    if not real_path.exists():
-        pytest.skip("Mysore Palace raw file not found")
-
-    img = cv2.imread(str(real_path))
+    img = cv2.imread(str(SYNTHETIC_PALACE))
+    assert img is not None, f"Cannot read synthetic fixture: {SYNTHETIC_PALACE}"
     char = analyze_image_characteristics(img)
     assert char["is_low_light"] is True
     assert char["sharpness"] > 300.0  # Already very sharp

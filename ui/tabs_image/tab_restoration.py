@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html import escape
+
 import cv2
 import streamlit as st
 
@@ -10,33 +12,75 @@ from modules.image.denoiser import (
     apply_bilateral_denoise,
     apply_gaussian_denoise,
 )
+from modules.image.gpu_manager import get_vision_execution_context
 from modules.image.neural_restoration import (
     MODEL_REGISTRY,
     get_neural_model_status,
     run_neural_restoration,
 )
+from modules.image.pipeline_image import bind_image_buffer
 from ui.tabs_image.common import bgr_to_display
+from ui.theme import badge
+from ui.utils_ux import render_tab_guidance_header
 
 
 TIER_CLASSICAL = "⚡ Tier-1: Classical Fast Filters (OpenCV)"
 TIER_NEURAL = "🚀 Tier-2: SOTA Deep Learning Models (ONNX/PyTorch)"
 
 
+def _format_hardware_status_badge(
+    vision_context: dict,
+    *,
+    tier: str | None = None,
+    device: str | None = None,
+) -> str:
+    """Build the styled hardware status_badge pill for image restoration."""
+    if tier == TIER_CLASSICAL:
+        return badge("💻 CPU Host Mode · OpenCV CPU", variant="accent")
+    if device == "cpu":
+        if "CPUExecutionProvider" not in vision_context["providers"]:
+            return badge("CPU Host Mode · OpenCV fallback", variant="warning")
+        return badge(
+            f"CPU Host Mode · ONNX CPU requested (thread cap: {vision_context['num_threads']})",
+            variant="accent",
+        )
+    return badge(
+        escape(vision_context["status_badge"]),
+        variant="success" if vision_context["onnx_cuda_available"] else "accent",
+    )
+
+
 def render_tab_restoration(uploaded_file) -> None:
     """Render classical and optional ONNX restoration controls."""
-    original = st.session_state.get("image_original_bgr")
-    if original is None:
+    render_tab_guidance_header(
+        title="Dual-Tier Image Restoration",
+        objective="Denoise, deblur, and upscale images with deterministic fallback.",
+        methodology=(
+            "Tier-1 runs OpenCV Bilateral/Gaussian + LAB CLAHE; Tier-2 runs "
+            "singleton-cached ONNX Runtime models (NAFNet, Restormer, Real-ESRGAN, SwinIR, RealPLKSR)."
+        ),
+        deliverable="Enhanced BGR image buffered in session state for Color & Export.",
+    )
+    buffer = st.session_state.get("image_buffer")
+    if buffer is None:
         st.info("Select a decodable image to configure restoration.")
         return
+    original = buffer.raw_bgr
 
     tier = st.radio(
         "Processing Tier",
         options=[TIER_CLASSICAL, TIER_NEURAL],
         key="image_processing_tier",
     )
+    vision_context = get_vision_execution_context() if tier == TIER_NEURAL else {}
     settings = {"tier": tier}
 
     if tier == TIER_CLASSICAL:
+        st.markdown(
+            _format_hardware_status_badge(vision_context, tier=TIER_CLASSICAL),
+            unsafe_allow_html=True,
+        )
+        st.caption("Vision execution provider: OpenCV CPU")
         st.caption("Fast local processing; no neural model weights are required.")
         apply_clahe = st.toggle(
             "Enable LAB-space CLAHE",
@@ -131,7 +175,7 @@ def render_tab_restoration(uploaded_file) -> None:
             ),
             key="restoration_neural_model",
         )
-        model_status = get_neural_model_status(model_name)
+        model_status = get_neural_model_status(model_name, execution_context=vision_context)
         st.caption(
             f"Task: {model_status['task']} | Native scale: "
             f"{model_status['native_scale']}×"
@@ -146,6 +190,8 @@ def render_tab_restoration(uploaded_file) -> None:
                 "Local ONNX weights are missing. Expected file: "
                 f"{model_status['model_path']}. OpenCV fallback will be used."
             )
+            if model_status["availability_note"]:
+                st.caption(model_status["availability_note"])
         elif not model_status["integrity_valid"]:
             st.error(
                 "Local ONNX weights failed checksum verification. Neural execution "
@@ -185,12 +231,29 @@ def render_tab_restoration(uploaded_file) -> None:
         device = parameter3.selectbox(
             "Device",
             options=(
-                ["cpu", "cuda"]
-                if model_status["cuda_available"]
-                else ["cpu"]
+                ["cuda", "cpu"] if model_status["cuda_available"] else ["cpu"]
             ),
             key="restoration_device",
         )
+        tier_status_badge = _format_hardware_status_badge(
+            vision_context,
+            tier=TIER_NEURAL,
+            device=device,
+        )
+        st.markdown(tier_status_badge, unsafe_allow_html=True)
+        if device == "cuda":
+            st.caption("Requested ONNX provider: CUDAExecutionProvider (CPU fallback enabled)")
+        else:
+            if (
+                vision_context["torch_cuda_available"]
+                and not vision_context["onnx_cuda_available"]
+            ):
+                st.caption(
+                    "PyTorch can use CUDA, but the ONNX CUDA provider is unavailable "
+                    "in this process. Check the GPU runtime installation."
+                )
+            else:
+                st.caption("Requested ONNX provider: CPUExecutionProvider")
         settings.update({
             "model_name": model_name,
             "scale_factor": scale_factor,
@@ -210,7 +273,6 @@ def render_tab_restoration(uploaded_file) -> None:
         key="image_reset_restoration",
     )
 
-    selected_name = st.session_state.get("image_selected_name", "image")
     if apply_clicked:
         with st.spinner("Running selected image restoration pipeline..."):
             if tier == TIER_CLASSICAL:
@@ -248,6 +310,7 @@ def render_tab_restoration(uploaded_file) -> None:
                     model_name=settings["model_name"],
                     scale_factor=settings["scale_factor"],
                     device=settings["device"],
+                    execution_context=vision_context,
                 )
                 processed = result_metadata["image_bgr"]
                 if settings["blend_alpha"] < 1.0:
@@ -256,6 +319,8 @@ def render_tab_restoration(uploaded_file) -> None:
                         (processed.shape[1], processed.shape[0]),
                         interpolation=cv2.INTER_LANCZOS4,
                     )
+                    if original_for_blend.ndim == 2 and processed.ndim == 3:
+                        original_for_blend = cv2.cvtColor(original_for_blend, cv2.COLOR_GRAY2BGR)
                     if (
                         original_for_blend.ndim == 3
                         and processed.ndim == 3
@@ -271,20 +336,13 @@ def render_tab_restoration(uploaded_file) -> None:
                         0.0,
                     )
 
-            st.session_state["processed_image_bgr"] = processed
-            st.session_state.setdefault("processed_images_bgr", {})[
-                selected_name
-            ] = processed.copy()
-            st.session_state["image_restoration_metadata"] = result_metadata
-            st.session_state.pop("image_export_result", None)
+            metadata = {k: v for k, v in result_metadata.items() if k != "image_bgr"}
+            buffer = buffer.with_restoration(processed, metadata)
+            bind_image_buffer(st.session_state, buffer)
 
     if reset_clicked:
-        st.session_state["processed_image_bgr"] = original.copy()
-        st.session_state.setdefault("processed_images_bgr", {}).pop(
-            selected_name, None
-        )
-        st.session_state.pop("image_restoration_metadata", None)
-        st.session_state.pop("image_export_result", None)
+        bind_image_buffer(st.session_state, buffer.reset_to_raw())
+        st.session_state["image_sync_color_widgets"] = True
         st.rerun()
 
     metadata = st.session_state.get("image_restoration_metadata")
@@ -298,7 +356,7 @@ def render_tab_restoration(uploaded_file) -> None:
             f"Latency: {float(metadata.get('latency_ms', 0.0)):.1f} ms"
         )
 
-    processed = st.session_state.get("processed_image_bgr", original)
+    processed = buffer.restored_bgr if buffer.restored_bgr is not None else original
     original_col, processed_col = st.columns(2)
     original_col.markdown("**Original Raw**")
     original_col.image(bgr_to_display(original), width="stretch")

@@ -203,15 +203,12 @@ def test_vision_upload_and_process_workflow(client):
 
 def test_mysore_palace_e2e_color_preservation(client):
     """
-    End-to-end integration test verifying that the golden-lit Mysore Palace image
-    maintains its natural warm golden light (Red > Blue) after full pipeline processing.
+    Verify that the synthetic golden night scene retains its warm colors after upload,
+    processing, and download. The fixture is an illustration, not a photograph.
     """
-    real_path = Path("storage/raw/7132dd25-c3f4-42da-b297-650b44a606f9/Mysore_palace_illuminated.jpg")
-    if not real_path.exists():
-        pytest.skip("Mysore Palace test asset not present on disk")
-
-    with open(real_path, "rb") as f:
-        upload_res = client.post("/api/v1/upload", files={"file": ("Mysore_palace_illuminated.jpg", f, "image/jpeg")})
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "Mysore_palace_illuminated.jpg"
+    with fixture_path.open("rb") as f:
+        upload_res = client.post("/api/v1/upload", files={"file": (fixture_path.name, f, "image/jpeg")})
     assert upload_res.status_code == 200
     ds_id = upload_res.json()["dataset_id"]
 
@@ -251,7 +248,6 @@ def test_mysore_palace_e2e_color_preservation(client):
     assert len(proc_bgr.shape) == 3
 
     # Check channels: Red is channel 2, Blue is channel 0
-    # In golden Mysore Palace, Red channel must be dominant over Blue!
     mean_b = proc_bgr[:, :, 0].mean()
     mean_g = proc_bgr[:, :, 1].mean()
     mean_r = proc_bgr[:, :, 2].mean()

@@ -1,4 +1,10 @@
 -r requirements.txt
 
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 # CPU ONNX Runtime for portable neural image restoration.
 onnxruntime==1.31.1
+
+# CPU-capable PyTorch/TorchAudio for neural voice models and polyphase resampling.
+torch==2.10.0+cpu
+torchaudio==2.10.0+cpu

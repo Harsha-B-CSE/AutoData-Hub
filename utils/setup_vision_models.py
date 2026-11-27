@@ -1,4 +1,4 @@
-"""Download and checksum-verify optional ONNX image-restoration weights."""
+"""Download and checksum-verify optional image-restoration models and checkpoints."""
 
 from __future__ import annotations
 
@@ -25,6 +25,14 @@ MODEL_FILES = {
             "url": "https://github.com/TechFlipsi/FlipsiColor-Models/releases/download/v0.2/RestormerLight.onnx",
             "sha256": "63759916b606b0dace088baf983b6379bacc441e79411cb1af915131eb763653",
             "license": "unspecified third-party ONNX export",
+        }
+    ],
+    "darkir": [
+        {
+            "filename": "DarkIR_384.pt",
+            "url": "https://huggingface.co/Cidaut/DarkIR/resolve/8a73ebf271c513dfda9d1df444762d8aa0b42138/DarkIR_384.pt",
+            "sha256": "61eee7d5cfb593d408fba4c716874449b324ed1f49cbff97c2a25ce2fcbe4fde",
+            "license": "CC-BY-4.0",
         }
     ],
     "real-esrgan": [
@@ -75,6 +83,9 @@ MODEL_FILES = {
     ],
 }
 
+# The primary download URL for each CLI choice; MODEL_FILES also records sidecars and digests.
+MODEL_DOWNLOAD_MAP = {model_id: files[0]["url"] for model_id, files in MODEL_FILES.items()}
+
 DEFAULT_MODEL_IDS = [
     "nafnet",
     "restormer",
@@ -102,27 +113,22 @@ def download_verified_file(entry: dict, destination: Path, force: bool = False) 
         entry["url"],
         headers={"User-Agent": "AutoData-Hub-Model-Setup/1.0"},
     )
-    with tempfile.NamedTemporaryFile(
-        prefix=f"{destination.name}.",
-        suffix=".download",
-        dir=destination.parent,
-        delete=False,
-    ) as temporary:
-        temporary_path = Path(temporary.name)
-        try:
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f"{destination.name}.", suffix=".download", dir=destination.parent, delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
             with urlopen(request, timeout=120) as response:
                 shutil.copyfileobj(response, temporary, length=1024 * 1024)
-        except Exception:
+        actual_hash = sha256_file(temporary_path)
+        if actual_hash != entry["sha256"]:
+            raise RuntimeError(f"Checksum mismatch for {destination.name}: {actual_hash}")
+        temporary_path.replace(destination)
+    finally:
+        # Windows cannot unlink the download while its file handle is open.
+        if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
-            raise
-
-    actual_hash = sha256_file(temporary_path)
-    if actual_hash != entry["sha256"]:
-        temporary_path.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"Checksum mismatch for {destination.name}: {actual_hash}"
-        )
-    temporary_path.replace(destination)
     return "downloaded"
 
 
@@ -148,13 +154,13 @@ def provision_models(
 def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
-        description="Download checksum-verified AutoData-Hub ONNX models."
+        description="Download checksum-verified AutoData-Hub vision models."
     )
     parser.add_argument(
-        "--model",
-        action="append",
-        choices=sorted(MODEL_FILES),
-        help="Provision only this model; repeat for multiple models.",
+        "--model", "--models",
+        action="extend", nargs="+",
+        choices=list(MODEL_DOWNLOAD_MAP.keys()),
+        help="Provision the named models; specify several IDs or repeat the flag.",
     )
     parser.add_argument(
         "--all",
@@ -172,7 +178,7 @@ def main() -> None:
     if arguments.all and arguments.model:
         parser.error("Use either --all or one/more --model options, not both.")
     selected = (
-        list(MODEL_FILES)
+        list(MODEL_DOWNLOAD_MAP)
         if arguments.all
         else arguments.model or DEFAULT_MODEL_IDS
     )
@@ -182,6 +188,8 @@ def main() -> None:
             f"[{result['status']}] {result['model']}: {result['file']} "
             f"({result['license']})"
         )
+        if result["model"] == "darkir":
+            print("DarkIR_384.pt is the authors' PyTorch checkpoint, not a darkir.onnx inference graph.")
 
 
 if __name__ == "__main__":
