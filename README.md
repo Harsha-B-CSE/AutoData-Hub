@@ -6,7 +6,7 @@
 [![PyTorch CUDA](https://img.shields.io/badge/PyTorch-CUDA%2012.x%2F13.x-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**AutoData-Hub** is a local-first, privacy-preserving multi-modal MLOps preprocessing and enhancement platform spanning **Tabular Datasets**, **Image Datasets**, **Voice / Audio**, and **Video Media**. It unifies `modules/` as the canonical single source of truth and processing core consumed by the interactive Streamlit workspace (`ui/`) and the FastAPI + React service layer (`backend/api/` + `frontend/`).
+**AutoData-Hub** is a local-first, privacy-preserving multi-modal MLOps preprocessing and enhancement platform spanning **Tabular Datasets**, **Image Datasets**, **Voice / Audio**, and **Video Media**. Streamlit provides the interactive workbench for all four modalities. The React dashboard and automated clients use FastAPI for tabular and image jobs.
 
 > **Security & Runtime Boundary:** AutoData-Hub is designed for local single-host evaluation and controlled development workflows. Bind services to loopback (`127.0.0.1`) unless fronted by an authenticated reverse proxy.
 
@@ -54,11 +54,40 @@
 +-----------------------------------------------------------------------------------+
 ```
 
+### 🔀 Dual-Framework Architecture: Streamlit & FastAPI Integration
+
+Streamlit calls Python processing functions directly: analysts can use the workbench without starting FastAPI. Conversely, React and automation clients can submit an API job and track its `job_id` without opening a Streamlit session.
+
+| Dimension | Streamlit (`app.py`, `ui/`) | FastAPI (`backend/`) |
+| :--- | :--- | :--- |
+| **Primary role** | Interactive analyst workbench for exploring data, inspecting telemetry, and approving transformations. | ASGI service for clients that upload datasets, submit jobs, and retrieve results. |
+| **Execution model** | Most widget interactions rerun the script from top to bottom. `st.session_state` retains dataset versions between reruns; the process reuses cached hardware resources. | Uvicorn runs the ASGI event loop; uploads `await` file reads. `POST /api/v1/process` records a job and uses `BackgroundTasks` to run the worker after sending the response. This is not a durable task queue. |
+| **Interface** | [Workbench](http://127.0.0.1:8501); live microphone audio uses WebRTC. | [Swagger UI](http://127.0.0.1:8000/docs) and REST endpoints. React polls `GET /api/v1/jobs/{job_id}` for progress; there is no FastAPI WebSocket endpoint. |
+
+#### 🧱 Decoupled Core Architecture Pattern
+
+```text
+AutoData-Hub
+|-- 1. Presentation
+|   |-- Analyst browser -> Streamlit (app.py, ui/)
+|   `-- React dashboard or API client -> FastAPI (backend/main.py)
+|-- 2. Processing: current call paths
+|   |-- Streamlit -> modules/ (health, privacy, imputation, media)
+|   `-- FastAPI job -> ProcessingOrchestrator -> backend/engines/
+`-- 3. Data and storage contracts
+    |-- Workbench -> core/ result dataclasses and versioned datasets
+    `-- API jobs -> SQLite metadata and artifacts under storage/
+```
+
+**State ownership.** Workbench modules return dataclasses such as [`ModuleResult` and `TransformResult`](core/schema_inference.py). The [dataset manager](core/dataset_manager.py) defines four storage tiers: in-memory versions, transient files in `tmp/scratch/`, persistent deliverables in `output/`, and an optional SQL sink. FastAPI keeps job status in SQLite; clients retrieve it over HTTP, not from Streamlit session state.
+
+**Preventing code divergence.** For a transform offered through both interfaces, keep the algorithm and its defaults in one function in `modules/`. Let the widget and the route adapt inputs and results, and test both paths with the same fixture and parameters. This is a design rule, not a guarantee of parity today: Streamlit calls [`MissingValueImputer`](modules/imputation/imputer.py), while the [API orchestrator](backend/core/orchestrator.py) calls a separate [`TabularImputer`](backend/engines/tabular/imputer.py).
+
 ### Engine Consolidation & Current Capability Matrix
 
 | Subsystem | Location | Status | Notes |
 | --- | --- | --- | --- |
-| **Unified Processing Core** | `modules/` | Implemented | Single source of truth consumed across `ui/` (Streamlit) and `backend/api/` (FastAPI) |
+| **Processing Engines** | `modules/`, `backend/engines/` | Implemented | The workbench calls `modules/`; API jobs use separate tabular and image engines in `backend/engines/`. |
 | **Tabular Hygiene Core** | `modules/tabular/`, `modules/health_audit/`, `modules/privacy/`, `modules/imputation/`, `modules/anomaly/` | Implemented | Non-mutating lineage (`v0_raw` → `v3_anomaly`), CleanML $Q$-Score, Luhn PII, MICE/KNN, IF/LOF/OC-SVM |
 | **AST Script Synthesizer** | `modules/tabular/synthesizer.py`, `modules/script_gen/exporter.py` | Full Multi-Modal AST Pipeline Exporter | Generates standalone validated `pipeline.py` scripts and ReportLab `audit_report.pdf` |
 | **Vision Core** | `modules/image/`, `ui/tabs_image/` | Implemented | Classical OpenCV + ONNX Runtime (`NAFNet`, `Restormer`, `Real-ESRGAN`, `SwinIR`, `RealPLKSR`, `DarkIR`) + ASC CDL Color Engine |
